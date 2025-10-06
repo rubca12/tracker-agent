@@ -66,6 +66,7 @@ jobs:
             libxcb-render0-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
+            libpipewire-0.3-dev \
             tesseract-ocr \
             tesseract-ocr-eng \
             libtesseract-dev \
