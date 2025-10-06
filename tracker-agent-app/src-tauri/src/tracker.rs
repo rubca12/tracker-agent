@@ -289,34 +289,60 @@ impl Tracker {
             .unwrap_or_else(|| "general_work".to_string());
 
         let current_application = match_result.detected_application.clone();
+        let current_activity = match_result.activity_description.clone();
 
         let mut tracking_guard = active_tracking.lock().await;
 
-        // Determine if application changed and if we should restart
-        let (application_changed, should_restart) = if let Some(ref tracking) = *tracking_guard {
+        // Determine if application or activity changed and if we should restart
+        let (application_changed, activity_changed, should_restart) = if let Some(ref tracking) = *tracking_guard {
             let app_changed = tracking.last_application != current_application;
+            let activity_changed = tracking.last_activity_description != current_activity;
 
-            if app_changed {
+            if app_changed || activity_changed {
                 let new_unstable_count = tracking.unstable_count + 1;
-                Self::emit_log(
-                    app,
-                    "info",
-                    &format!(
-                        "🔍 Aplikace se změnila: {} → {} (nestabilní tick: {}/2)",
-                        tracking.last_application, current_application, new_unstable_count
-                    ),
-                );
-                (true, new_unstable_count >= 2)
+
+                if app_changed && activity_changed {
+                    Self::emit_log(
+                        app,
+                        "info",
+                        &format!(
+                            "🔍 Aplikace i aktivita se změnily: {} → {} | {} → {} (nestabilní tick: {}/2)",
+                            tracking.last_application, current_application,
+                            tracking.last_activity_description, current_activity,
+                            new_unstable_count
+                        ),
+                    );
+                } else if app_changed {
+                    Self::emit_log(
+                        app,
+                        "info",
+                        &format!(
+                            "🔍 Aplikace se změnila: {} → {} (nestabilní tick: {}/2)",
+                            tracking.last_application, current_application, new_unstable_count
+                        ),
+                    );
+                } else {
+                    Self::emit_log(
+                        app,
+                        "info",
+                        &format!(
+                            "🔍 Aktivita se změnila: {} → {} (nestabilní tick: {}/2)",
+                            tracking.last_activity_description, current_activity, new_unstable_count
+                        ),
+                    );
+                }
+
+                (app_changed, activity_changed, new_unstable_count >= 2)
             } else {
                 Self::emit_log(
                     app,
                     "info",
-                    &format!("✅ Aplikace stejná: {} (reset počítadla)", current_application),
+                    &format!("✅ Aplikace i aktivita stejné: {} (reset počítadla)", current_application),
                 );
-                (false, false)
+                (false, false, false)
             }
         } else {
-            (false, false)
+            (false, false, false)
         };
 
         // Check current state
@@ -329,15 +355,16 @@ impl Tracker {
         if should_continue_same_task {
             // A) Tracking active, same task, no restart
             if let Some(ref mut tracking) = *tracking_guard {
-                if !application_changed {
+                if !application_changed && !activity_changed {
                     tracking.unstable_count = 0;
                 } else {
                     tracking.unstable_count += 1;
                     tracking.last_application = current_application.clone();
+                    tracking.last_activity_description = current_activity.clone();
                     Self::emit_log(
                         app,
                         "warning",
-                        &format!("⚠️  Aplikace se mění, ale čekáme na stabilizaci ({}/2)", tracking.unstable_count),
+                        &format!("⚠️  Kontext se mění, ale čekáme na stabilizaci ({}/2)", tracking.unstable_count),
                     );
                 }
 
@@ -349,11 +376,17 @@ impl Tracker {
             }
         } else if should_restart && tracking_guard.is_some() {
 
-            // A2) Tracking active, application changed significantly (RESTART with hysteresis)
+            // A2) Tracking active, context changed significantly (RESTART with hysteresis)
             let tracking = tracking_guard.take().unwrap();
-            Self::emit_log(app, "info", "🔄 TRACKING: Aplikace se změnila, restartuji tracking");
-            Self::emit_log(app, "info", &format!("   Stará aplikace: {}", tracking.last_application));
-            Self::emit_log(app, "info", &format!("   Nová aplikace: {}", current_application));
+            Self::emit_log(app, "info", "🔄 TRACKING: Kontext se změnil, restartuji tracking");
+            if application_changed {
+                Self::emit_log(app, "info", &format!("   Stará aplikace: {}", tracking.last_application));
+                Self::emit_log(app, "info", &format!("   Nová aplikace: {}", current_application));
+            }
+            if activity_changed {
+                Self::emit_log(app, "info", &format!("   Stará aktivita: {}", tracking.last_activity_description));
+                Self::emit_log(app, "info", &format!("   Nová aktivita: {}", current_activity));
+            }
 
             // Stop old tracking
             if let Err(e) = freelo.stop_tracking(&tracking.uuid).await {
@@ -372,9 +405,10 @@ impl Tracker {
                         start_time: SystemTime::now(),
                         last_context: current_application.clone(),
                         last_application: current_application.clone(),
+                        last_activity_description: current_activity.clone(),
                         unstable_count: 0,
                     });
-                    Self::emit_log(app, "success", &format!("▶️  TRACKING: Start s novou aplikací (UUID: {})", uuid));
+                    Self::emit_log(app, "success", &format!("▶️  TRACKING: Start s novým kontextem (UUID: {})", uuid));
                 }
                 Err(e) => {
                     Self::emit_log(app, "error", &format!("CHYBA START TRACKING: {}", e));
@@ -393,6 +427,7 @@ impl Tracker {
                         start_time: SystemTime::now(),
                         last_context: current_application.clone(),
                         last_application: current_application.clone(),
+                        last_activity_description: current_activity.clone(),
                         unstable_count: 0,
                     });
 

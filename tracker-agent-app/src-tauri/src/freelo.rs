@@ -41,6 +41,7 @@ pub struct ActiveTracking {
     pub start_time: std::time::SystemTime,
     pub last_context: String,
     pub last_application: String,
+    pub last_activity_description: String,
     pub unstable_count: u32,
 }
 
