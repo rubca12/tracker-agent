@@ -78,29 +78,40 @@ jobs:
         run: |
           brew install tesseract tesseract-lang
 
+      - name: Cache vcpkg (Windows)
+        if: startsWith(matrix.platform.os, 'windows')
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\packages
+            C:\vcpkg\buildtrees
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build.yml') }}-v2
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
       - name: Install dependencies (Windows)
         if: startsWith(matrix.platform.os, 'windows')
         shell: powershell
         run: |
-          # Instalace Tesseract přes Chocolatey
-          choco install tesseract -y
+          # Setup vcpkg pokud neexistuje
+          if (-not (Test-Path "C:\vcpkg\vcpkg.exe")) {
+            Write-Host "Setting up vcpkg..."
+            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+            C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          }
 
-          # Najít instalační cestu
-          $tesseractPath = "C:\Program Files\Tesseract-OCR"
+          # Instalace Tesseract a Leptonica (static linkage)
+          Write-Host "Installing tesseract and leptonica..."
+          C:\vcpkg\vcpkg install tesseract:x64-windows-static leptonica:x64-windows-static --clean-after-build
 
-          # Přidat do PATH
-          echo "$tesseractPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Nastavit environment variables
+          $vcpkgRoot = "C:\vcpkg\installed\x64-windows-static"
+          echo "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "$vcpkgRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          # Nastavit environment variables pro leptonica-sys a tesseract-sys
-          # leptonica-sys hledá vcpkg, takže musíme nastavit LEPT_NO_PKG_CONFIG
-          echo "LEPT_NO_PKG_CONFIG=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LEPTONICA_INCLUDE_PATH=$tesseractPath\include\leptonica" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LEPTONICA_LINK_PATHS=$tesseractPath\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LEPTONICA_LINK_LIBS=leptonica-1.84.1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          # Vypsat obsah adresáře pro debugging
-          Write-Host "Tesseract installation contents:"
-          Get-ChildItem -Path $tesseractPath -Recurse | Select-Object FullName
+          # Pro static linking
+          echo "RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install frontend dependencies
         working-directory: tracker-agent-app
