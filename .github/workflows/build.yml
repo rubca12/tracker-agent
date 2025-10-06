@@ -78,17 +78,30 @@ jobs:
         run: |
           brew install tesseract tesseract-lang
 
-      - name: Setup vcpkg (Windows)
-        if: startsWith(matrix.platform.os, 'windows')
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'c8696863d371ab7f46e213d8f5ca923c4aef2a00'
-
       - name: Install dependencies (Windows)
         if: startsWith(matrix.platform.os, 'windows')
+        shell: powershell
         run: |
-          vcpkg install tesseract:x64-windows leptonica:x64-windows
-          echo "$env:VCPKG_ROOT\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Stáhnout a nainstalovat Tesseract z UB Mannheim
+          $tesseractUrl = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-5.3.3.20231005.exe"
+          $installerPath = "$env:TEMP\tesseract-installer.exe"
+
+          Write-Host "Downloading Tesseract..."
+          Invoke-WebRequest -Uri $tesseractUrl -OutFile $installerPath
+
+          Write-Host "Installing Tesseract..."
+          Start-Process -FilePath $installerPath -ArgumentList "/S", "/D=C:\Program Files\Tesseract-OCR" -Wait
+
+          # Přidat do PATH
+          echo "C:\Program Files\Tesseract-OCR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # Nastavit environment variables pro build
+          echo "TESSERACT_INCLUDE_PATH=C:\Program Files\Tesseract-OCR\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "TESSERACT_LINK_PATHS=C:\Program Files\Tesseract-OCR\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "TESSERACT_LINK_LIBS=tesseract53" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LEPTONICA_INCLUDE_PATH=C:\Program Files\Tesseract-OCR\include\leptonica" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LEPTONICA_LINK_PATHS=C:\Program Files\Tesseract-OCR\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LEPTONICA_LINK_LIBS=leptonica-1.83.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install frontend dependencies
         working-directory: tracker-agent-app
