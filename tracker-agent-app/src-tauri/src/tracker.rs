@@ -1,18 +1,20 @@
-use crate::ai::{analyze_screenshot, AIAnalysisResult};
 use crate::freelo::{ActiveTracking, FreeloClient, FreeloTask};
 use crate::screenshot::capture_and_encode;
+use crate::ocr::extract_text_from_screenshot;
+use crate::text_matcher::{find_best_matching_task, MatchResult};
+use crate::ai_matcher::match_task_with_ai;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration};
 
 #[derive(Clone)]
 pub struct TrackerConfig {
     pub interval_seconds: u64,
-    pub openrouter_key: String,
     pub freelo_email: String,
     pub freelo_api_key: String,
+    pub openrouter_api_key: Option<String>,
 }
 
 pub struct Tracker {
@@ -136,65 +138,127 @@ impl Tracker {
                 break;
             }
 
+            // Skrýt okno před screenshotem
+            Self::emit_log(&app, "info", "📸 Skrývám okno pro screenshot...");
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(e) = window.hide() {
+                    Self::emit_log(&app, "error", &format!("Chyba při skrývání okna: {}", e));
+                }
+                // Počkat 300ms aby se okno stihlo skrýt
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            }
+
             // Capture screenshot
             Self::emit_log(&app, "info", "📸 Zachytávám screenshot...");
             let screenshot = match capture_and_encode() {
                 Ok(s) => s,
                 Err(e) => {
                     Self::emit_log(&app, "error", &format!("Chyba při screenshotu: {}", e));
+                    // Zobrazit okno zpět i při chybě
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                    }
                     continue;
                 }
             };
+
+            // Zobrazit okno zpět
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(e) = window.show() {
+                    Self::emit_log(&app, "error", &format!("Chyba při zobrazení okna: {}", e));
+                }
+            }
 
             // Get tasks
             let tasks = freelo_tasks_cache.lock().await.clone();
-            let tasks_for_ai: Vec<(String, String, String)> = tasks
-                .iter()
-                .map(|t| (t.id.to_string(), t.project_name.clone(), t.name.clone()))
-                .collect();
 
-            // Get previous context
-            let previous_context = active_tracking
-                .lock()
-                .await
-                .as_ref()
-                .map(|t| t.last_application.clone());
+            // OCR - extrakce textu ze screenshotu (v samostatném vlákně)
+            // DEBUG MODE: save_debug = true pro ukládání mezikroků
+            Self::emit_log(&app, "info", "📖 Spouštím OCR (debug mode)...");
+            let screenshot_clone = screenshot.clone();
+            let ocr_result = tokio::task::spawn_blocking(move || {
+                extract_text_from_screenshot(&screenshot_clone, true) // true = debug mode
+            })
+            .await;
 
-            // Analyze with AI
-            Self::emit_log(&app, "info", "🤖 Analyzuji s AI...");
-            let analysis = match analyze_screenshot(
-                &cfg.openrouter_key,
-                &screenshot,
-                tasks_for_ai,
-                previous_context,
-            )
-            .await
-            {
-                Ok(a) => a,
+            let ocr_text = match ocr_result {
+                Ok(Ok(text)) => text,
+                Ok(Err(e)) => {
+                    Self::emit_log(&app, "error", &format!("OCR chyba: {}", e));
+                    continue;
+                }
                 Err(e) => {
-                    Self::emit_log(&app, "error", &format!("AI chyba: {}", e));
+                    Self::emit_log(&app, "error", &format!("OCR task chyba: {}", e));
                     continue;
                 }
             };
 
-            // Log analysis
+            Self::emit_log(&app, "info", &format!("✅ OCR: Extrahováno {} znaků", ocr_text.len()));
+
+            // Zkus AI matching pokud máme OpenRouter API key
+            let match_result = if let Some(ref openrouter_key) = cfg.openrouter_api_key {
+                Self::emit_log(&app, "info", "🤖 Zkouším AI matching...");
+
+                match match_task_with_ai(&ocr_text, &tasks, openrouter_key).await {
+                    Ok(ai_result) => {
+                        Self::emit_log(
+                            &app,
+                            "info",
+                            &format!("✅ AI Match: confidence={}%, activity={}", ai_result.confidence, ai_result.activity_description)
+                        );
+
+                        // Převeď AI výsledek na MatchResult
+                        let task_name = ai_result.task_id.and_then(|id| {
+                            tasks.iter().find(|t| t.id == id).map(|t| t.name.clone())
+                        });
+
+                        MatchResult {
+                            task_id: ai_result.task_id,
+                            task_name,
+                            confidence: ai_result.confidence / 100.0, // AI vrací 0-100, MatchResult očekává 0-1
+                            detected_application: "AI Detection".to_string(),
+                            matched_keywords: vec![],
+                            activity_description: ai_result.activity_description,
+                        }
+                    }
+                    Err(e) => {
+                        Self::emit_log(&app, "warning", &format!("⚠️  AI matching selhal: {}. Používám fallback.", e));
+                        Self::emit_log(&app, "info", "🔍 Fallback: Textové porovnání...");
+                        find_best_matching_task(&ocr_text, &tasks)
+                    }
+                }
+            } else {
+                // Bez OpenRouter API key - použij klasický text matching
+                Self::emit_log(&app, "info", "🔍 Hledám matching task (textové porovnání)...");
+                find_best_matching_task(&ocr_text, &tasks)
+            };
+
+            // Log match result
             Self::emit_log(
                 &app,
                 "info",
                 &format!(
-                    "📊 Aktivita: {} | Kontext: {} | Confidence: {:.0}%",
-                    analysis.summary,
-                    analysis.detected_context,
-                    analysis.confidence * 100.0
+                    "📊 Aplikace: {} | Task: {} | Confidence: {:.0}%",
+                    match_result.detected_application,
+                    match_result.task_name.as_deref().unwrap_or("Žádný"),
+                    match_result.confidence * 100.0
                 ),
             );
+
+            if !match_result.matched_keywords.is_empty() {
+                Self::emit_log(
+                    &app,
+                    "info",
+                    &format!("🔑 Matched keywords: {}", match_result.matched_keywords.join(", ")),
+                );
+            }
 
             // Update tracking info in UI
             Self::emit_tracking_update(
                 &app,
-                &analysis.detected_context,
-                &analysis.summary,
-                analysis.task_id.as_deref().or(analysis.best_match_task_name.as_deref()),
+                &match_result.detected_application,
+                &format!("OCR: {} znaků", ocr_text.len()),
+                match_result.task_name.as_deref(),
             );
 
             // Handle tracking logic
@@ -202,7 +266,7 @@ impl Tracker {
                 &app,
                 &freelo,
                 &active_tracking,
-                &analysis,
+                &match_result,
             )
             .await;
         }
@@ -212,10 +276,10 @@ impl Tracker {
         app: &AppHandle,
         freelo: &FreeloClient,
         active_tracking: &Arc<Mutex<Option<ActiveTracking>>>,
-        analysis: &AIAnalysisResult,
+        match_result: &MatchResult,
     ) {
-        let new_task_id = if analysis.confidence > 0.8 {
-            analysis.task_id.clone()
+        let new_task_id = if match_result.confidence > 0.3 {
+            match_result.task_id.map(|id| id.to_string())
         } else {
             None
         };
@@ -224,7 +288,7 @@ impl Tracker {
             .clone()
             .unwrap_or_else(|| "general_work".to_string());
 
-        let current_application = analysis.detected_context.clone();
+        let current_application = match_result.detected_application.clone();
 
         let mut tracking_guard = active_tracking.lock().await;
 
@@ -297,16 +361,16 @@ impl Tracker {
             }
 
             // Start new tracking
-            let note = format!("AI: {}", analysis.summary);
+            let note = &match_result.activity_description;
             let task_id_ref = new_task_id.as_ref().map(|s| s.as_str());
 
-            match freelo.start_tracking(task_id_ref, &note).await {
+            match freelo.start_tracking(task_id_ref, note).await {
                 Ok(uuid) => {
                     *tracking_guard = Some(ActiveTracking {
                         task_id: tracking_key.clone(),
                         uuid: uuid.clone(),
                         start_time: SystemTime::now(),
-                        last_context: analysis.detected_context.clone(),
+                        last_context: current_application.clone(),
                         last_application: current_application.clone(),
                         unstable_count: 0,
                     });
@@ -318,16 +382,16 @@ impl Tracker {
             }
         } else if tracking_guard.is_none() {
             // C) No tracking active - START
-            let note = format!("AI: {}", analysis.summary);
+            let note = &match_result.activity_description;
             let task_id_ref = new_task_id.as_ref().map(|s| s.as_str());
 
-            match freelo.start_tracking(task_id_ref, &note).await {
+            match freelo.start_tracking(task_id_ref, note).await {
                 Ok(uuid) => {
                     *tracking_guard = Some(ActiveTracking {
                         task_id: tracking_key.clone(),
                         uuid: uuid.clone(),
                         start_time: SystemTime::now(),
-                        last_context: analysis.detected_context.clone(),
+                        last_context: current_application.clone(),
                         last_application: current_application.clone(),
                         unstable_count: 0,
                     });

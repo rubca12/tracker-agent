@@ -53,16 +53,22 @@
               <input type="number" id="interval" value="10" min="5" max="60" />
             </div>
             <div class="form-group">
-              <label for="openrouter-key">OpenRouter API Key:</label>
-              <input type="password" id="openrouter-key" placeholder="sk-or-v1-..." />
-            </div>
-            <div class="form-group">
               <label for="freelo-email">Freelo Email:</label>
               <input type="email" id="freelo-email" placeholder="vas@email.cz" />
             </div>
             <div class="form-group">
               <label for="freelo-key">Freelo API Key:</label>
               <input type="password" id="freelo-key" placeholder="..." />
+            </div>
+            <div class="form-group">
+              <label for="openrouter-key">OpenRouter API Key (volitelné):</label>
+              <input type="password" id="openrouter-key" placeholder="sk-or-..." />
+            </div>
+            <div class="info-box">
+              <p>ℹ️ <strong>AI Matching:</strong> Pokud zadáš OpenRouter API key, aplikace použije AI (Gemini Flash 1.5) pro přesnější matching tasků. Bez API key se použije základní textové porovnání.</p>
+            </div>
+            <div class="warning-box">
+              <p>⚠️ <strong>Důležité:</strong> Pro správné fungování trackingu minimalizujte tuto aplikaci nebo ji přesuňte na jiný desktop. Screenshot zachytává celou obrazovku, takže pokud je tato aplikace v popředí, OCR nebude vidět vaši pracovní aplikaci.</p>
             </div>
             <button id="save-settings" class="btn-primary">💾 Uložit nastavení</button>
           </div>

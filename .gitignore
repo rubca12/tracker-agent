@@ -14,6 +14,7 @@ dist/
 
 # Tauri
 tracker-agent-app/src-tauri/target/
+tracker-agent-app/debug_screenshots/
 
 # IDE
 .vscode/

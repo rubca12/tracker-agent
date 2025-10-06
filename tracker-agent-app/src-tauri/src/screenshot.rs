@@ -1,37 +1,51 @@
 use base64::{engine::general_purpose, Engine as _};
 use image::ImageFormat;
-use screenshots::Screen;
 use std::io::Cursor;
+use tracing::info;
+use xcap::Monitor;
 
+/// Zachytí celou obrazovku
 pub fn capture_and_encode() -> Result<String, String> {
-    // Get first screen
-    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let screen = screens
+    info!("🔍 Screenshot: Získávám seznam monitorů pomocí xcap...");
+
+    // Get all monitors
+    let monitors = Monitor::all().map_err(|e| {
+        let err_msg = format!("Failed to get monitors: {}. DŮLEŽITÉ: Aplikace potřebuje Screen Recording permission!", e);
+        info!("❌ {}", err_msg);
+        err_msg
+    })?;
+
+    // Get primary monitor, fallback to first monitor
+    let monitor = monitors
         .into_iter()
-        .next()
-        .ok_or("No screens found")?;
+        .find(|m| m.is_primary().unwrap_or(false))
+        .or_else(|| Monitor::all().ok()?.into_iter().next())
+        .ok_or_else(|| {
+            let err_msg = "No monitors found".to_string();
+            info!("❌ {}", err_msg);
+            err_msg
+        })?;
+
+    let monitor_name = monitor.name().unwrap_or_else(|_| "Unknown".to_string());
+    let monitor_width = monitor.width().unwrap_or(0);
+    let monitor_height = monitor.height().unwrap_or(0);
+
+    info!("📸 Screenshot: Zachytávám monitor '{}' ({}x{})...",
+        monitor_name, monitor_width, monitor_height);
 
     // Capture screenshot
-    let image = screen
-        .capture()
-        .map_err(|e| format!("Failed to capture screen: {}", e))?;
+    let image = monitor.capture_image().map_err(|e| {
+        let err_msg = format!("Failed to capture monitor: {}", e);
+        info!("❌ {}", err_msg);
+        err_msg
+    })?;
 
-    // Convert to DynamicImage
-    let img = image::DynamicImage::ImageRgba8(
-        image::RgbaImage::from_raw(
-            image.width(),
-            image.height(),
-            image.to_vec(),
-        )
-        .ok_or("Failed to create image from buffer")?,
-    );
+    info!("✅ Screenshot: Zachyceno {}x{} pixelů", image.width(), image.height());
 
-    // Resize if too large (max width 1920px)
-    let img = if img.width() > 1920 {
-        img.resize(1920, (1920 * img.height()) / img.width(), image::imageops::FilterType::Lanczos3)
-    } else {
-        img
-    };
+    // xcap vrací RgbaImage, konvertujeme na DynamicImage
+    let img = image::DynamicImage::ImageRgba8(image);
+
+    info!("📦 Screenshot: Kóduji do JPEG...");
 
     // Encode to JPEG
     let mut buffer = Cursor::new(Vec::new());
@@ -41,6 +55,7 @@ pub fn capture_and_encode() -> Result<String, String> {
     // Base64 encode
     let base64_string = general_purpose::STANDARD.encode(buffer.into_inner());
 
+    info!("✅ Screenshot: Hotovo ({} bytů base64)", base64_string.len());
+
     Ok(base64_string)
 }
-

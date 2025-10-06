@@ -15,9 +15,9 @@ let saveSettingsButton: HTMLButtonElement;
 
 // Settings inputs
 let intervalInput: HTMLInputElement;
-let openrouterKeyInput: HTMLInputElement;
 let freeloEmailInput: HTMLInputElement;
 let freeloKeyInput: HTMLInputElement;
+let openrouterKeyInput: HTMLInputElement;
 
 // Initialize app
 window.addEventListener("DOMContentLoaded", async () => {
@@ -34,9 +34,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   saveSettingsButton = document.getElementById("save-settings") as HTMLButtonElement;
 
   intervalInput = document.getElementById("interval") as HTMLInputElement;
-  openrouterKeyInput = document.getElementById("openrouter-key") as HTMLInputElement;
   freeloEmailInput = document.getElementById("freelo-email") as HTMLInputElement;
   freeloKeyInput = document.getElementById("freelo-key") as HTMLInputElement;
+  openrouterKeyInput = document.getElementById("openrouter-key") as HTMLInputElement;
 
   // Event listeners
   startButton.addEventListener("click", startTracking);
@@ -52,8 +52,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateTrackingInfo(event.payload);
   });
 
-  // Load saved settings
-  loadSettings();
+  // Load saved settings (async)
+  await loadSettings();
 
   addLogEntry("info", "Aplikace inicializována");
   updateStatus("inactive", "Připraveno");
@@ -89,9 +89,9 @@ async function stopTracking() {
 async function saveSettings() {
   const settings = {
     interval: parseInt(intervalInput.value),
-    openrouter_key: openrouterKeyInput.value,
     freelo_email: freeloEmailInput.value,
     freelo_key: freeloKeyInput.value,
+    openrouter_key: openrouterKeyInput.value || null,
   };
 
   try {
@@ -106,17 +106,22 @@ async function saveSettings() {
 }
 
 // Load settings from localStorage
-function loadSettings() {
+async function loadSettings() {
   const saved = localStorage.getItem("tracker-settings");
   if (saved) {
     try {
       const settings = JSON.parse(saved);
       intervalInput.value = settings.interval || "10";
-      openrouterKeyInput.value = settings.openrouter_key || "";
       freeloEmailInput.value = settings.freelo_email || "";
       freeloKeyInput.value = settings.freelo_key || "";
+      openrouterKeyInput.value = settings.openrouter_key || "";
+
+      // Automaticky pošli nastavení do backendu
+      await invoke("save_settings", { settings });
+      addLogEntry("info", "Nastavení načteno z localStorage");
     } catch (error) {
       console.error("Failed to load settings:", error);
+      addLogEntry("warning", "Nepodařilo se načíst uložená nastavení");
     }
   }
 }

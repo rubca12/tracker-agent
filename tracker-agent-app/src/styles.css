@@ -285,3 +285,35 @@ button:disabled {
     padding: 1rem;
   }
 }
+
+/* Info Box */
+.info-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #e0f2fe;
+  border-left: 4px solid #0284c7;
+  border-radius: 4px;
+}
+
+.info-box p {
+  margin: 0;
+  color: #0c4a6e;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Warning Box */
+.warning-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #fef3c7;
+  border-left: 4px solid #f59e0b;
+  border-radius: 4px;
+}
+
+.warning-box p {
+  margin: 0;
+  color: #78350f;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}

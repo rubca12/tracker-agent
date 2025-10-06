@@ -1,7 +1,9 @@
-mod ai;
 mod freelo;
 mod screenshot;
 mod tracker;
+mod ocr;
+mod text_matcher;
+mod ai_matcher;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -13,9 +15,9 @@ use tracker::{Tracker, TrackerConfig};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Settings {
     interval: u64,
-    openrouter_key: String,
     freelo_email: String,
     freelo_key: String,
+    openrouter_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,9 +59,9 @@ async fn save_settings(
     // Convert to TrackerConfig
     let config = TrackerConfig {
         interval_seconds: settings.interval,
-        openrouter_key: settings.openrouter_key.clone(),
         freelo_email: settings.freelo_email.clone(),
         freelo_api_key: settings.freelo_key.clone(),
+        openrouter_api_key: settings.openrouter_key.clone(),
     };
 
     state.tracker.set_config(config).await;
