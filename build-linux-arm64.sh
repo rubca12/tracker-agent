@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y \
     libxcb-xfixes0-dev \
     libpipewire-0.3-dev \
     libgbm-dev \
+    libssl-dev \
+    pkg-config \
+    libclang-dev \
     tesseract-ocr \
     tesseract-ocr-eng \
     libtesseract-dev \
