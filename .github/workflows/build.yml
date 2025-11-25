@@ -54,6 +54,7 @@ jobs:
               tesseract-ocr-eng \
               libtesseract-dev \
               libleptonica-dev \
+              xdg-utils \
               && rm -rf /var/lib/apt/lists/*
 
           RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -67,7 +68,9 @@ jobs:
 
           WORKDIR /app/tracker-agent-app
           RUN npm ci
-          RUN npm run tauri build
+
+          # Build pouze .deb (ne .rpm a .AppImage) pro rychlejší build
+          RUN npm run tauri build -- --bundles deb
           EOF
 
           docker buildx build --platform linux/arm64 -f Dockerfile.arm64 -t tracker-agent-arm64 --load .
@@ -75,8 +78,7 @@ jobs:
           # Extract artifacts
           docker create --name temp tracker-agent-arm64
           mkdir -p dist/linux-arm64
-          docker cp temp:/app/tracker-agent-app/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/. dist/linux-arm64/ || true
-          docker cp temp:/app/tracker-agent-app/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/. dist/linux-arm64/ || true
+          docker cp temp:/app/tracker-agent-app/src-tauri/target/release/bundle/deb/. dist/linux-arm64/ || true
           docker rm temp
 
           ls -lh dist/linux-arm64/
