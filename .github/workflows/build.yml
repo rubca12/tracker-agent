@@ -10,6 +10,83 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-arm64-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ARM64 Linux
+        run: |
+          cat > Dockerfile.arm64 << 'EOF'
+          FROM --platform=linux/arm64 ubuntu:24.04
+
+          ENV DEBIAN_FRONTEND=noninteractive
+
+          RUN apt-get update && apt-get install -y \
+              curl \
+              build-essential \
+              libgtk-3-dev \
+              libwebkit2gtk-4.1-dev \
+              libappindicator3-dev \
+              librsvg2-dev \
+              patchelf \
+              libx11-dev \
+              libxcb1-dev \
+              libxcb-render0-dev \
+              libxcb-shape0-dev \
+              libxcb-xfixes0-dev \
+              libpipewire-0.3-dev \
+              libgbm-dev \
+              libssl-dev \
+              pkg-config \
+              libclang-dev \
+              tesseract-ocr \
+              tesseract-ocr-eng \
+              libtesseract-dev \
+              libleptonica-dev \
+              && rm -rf /var/lib/apt/lists/*
+
+          RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+              && apt-get install -y nodejs
+
+          RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          ENV PATH="/root/.cargo/bin:${PATH}"
+
+          WORKDIR /app
+          COPY . .
+
+          WORKDIR /app/tracker-agent-app
+          RUN npm ci
+          RUN npm run tauri build
+          EOF
+
+          docker buildx build --platform linux/arm64 -f Dockerfile.arm64 -t tracker-agent-arm64 --load .
+
+          # Extract artifacts
+          docker create --name temp tracker-agent-arm64
+          mkdir -p dist/linux-arm64
+          docker cp temp:/app/tracker-agent-app/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/. dist/linux-arm64/ || true
+          docker cp temp:/app/tracker-agent-app/src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/. dist/linux-arm64/ || true
+          docker rm temp
+
+          ls -lh dist/linux-arm64/
+
+      - name: Upload ARM64 Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: dist/linux-arm64/*
+
   build:
     strategy:
       fail-fast: false
